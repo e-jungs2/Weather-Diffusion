@@ -1,1 +1,1 @@
-input/3_rain.png gt/3_clean.png
+input/3_rain.png
