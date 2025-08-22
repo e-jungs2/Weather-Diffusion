@@ -4,4 +4,4 @@
 *.py[cod]
 *.xml
 venv/
-results/
+
