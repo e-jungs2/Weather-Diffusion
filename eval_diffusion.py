@@ -4,8 +4,15 @@ import yaml
 import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
-import datasets
-from models import DenoisingDiffusion, DiffusiveRestoration
+import datasets_finetune as datasets
+# ✅ finetune 모델 사용 (기본 models 대신)
+import models_finetune as models
+from models_finetune import DenoisingDiffusion, DiffusiveRestoration
+
+# 🔓 PyTorch 2.6 안전 로더 허용 (ckpt에 argparse.Namespace 있음)
+import torch, argparse
+torch.serialization.add_safe_globals([argparse.Namespace])
+
 
 def dict2namespace(d):
     ns = argparse.Namespace()

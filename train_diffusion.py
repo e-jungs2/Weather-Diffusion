@@ -1,7 +1,7 @@
 # train_diffusion.py  (교체본)
 import argparse, os, yaml, torch, numpy as np
 import torch.backends.cudnn as cudnn
-import datasets
+import datasets_finetune as datasets
 import models_finetune as models
 from models_finetune import DenoisingDiffusion, DiffusiveRestoration
 
