@@ -1,89 +1,71 @@
 import argparse
 import os
-import random
-import socket
 import yaml
 import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
-import torchvision
-import models
 import datasets
-import utils
 from models import DenoisingDiffusion, DiffusiveRestoration
 
+def dict2namespace(d):
+    ns = argparse.Namespace()
+    for k, v in d.items():
+        setattr(ns, k, dict2namespace(v) if isinstance(v, dict) else v)
+    return ns
 
 def parse_args_and_config():
-    parser = argparse.ArgumentParser(description='Restoring Weather with Patch-Based Denoising Diffusion Models')
-    parser.add_argument("--config", type=str, required=True,
-                        help="Path to the config file")
-    parser.add_argument('--resume', default='', type=str,
-                        help='Path for the diffusion model checkpoint to load for evaluation')
-    parser.add_argument("--grid_r", type=int, default=16,
-                        help="Grid cell width r that defines the overlap between patches")
-    parser.add_argument("--sampling_timesteps", type=int, default=25,
-                        help="Number of implicit sampling steps")
-    parser.add_argument("--test_set", type=str, default='raindrop',
-                        help="restoration test set options: ['raindrop', 'snow', 'rainfog']")
-    parser.add_argument("--image_folder", default='results/images/', type=str,
-                        help="Location to save restored images")
-    parser.add_argument('--seed', default=61, type=int, metavar='N',
-                        help='Seed for initializing training (default: 61)')
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(description='Restoring Weather - Evaluation')
+    p.add_argument("--config", type=str, required=True, help="Config file path or name under ./configs")
+    p.add_argument("--resume", type=str, required=True, help="Path to the checkpoint (.pth.tar)")
+    p.add_argument("--grid_r", type=int, default=16, help="Patch overlap r (kept for compatibility)")
+    p.add_argument("--sampling_timesteps", type=int, default=25, help="Number of sampling steps")
+    p.add_argument("--image_folder", type=str, default="results/images/", help="Where to save restored images")
+    p.add_argument("--seed", type=int, default=61)
 
-    with open(os.path.join("configs", args.config), "r") as f:
+    args = p.parse_args()
+
+    # config 경로 강건화: 전체 경로 or ./configs/파일명 둘 다 허용
+    cfg_path = args.config if os.path.isfile(args.config) else os.path.join("configs", args.config)
+    with open(cfg_path, "r") as f:
         config = yaml.safe_load(f)
-    new_config = dict2namespace(config)
-
-    return args, new_config
-
-
-def dict2namespace(config):
-    namespace = argparse.Namespace()
-    for key, value in config.items():
-        if isinstance(value, dict):
-            new_value = dict2namespace(value)
-        else:
-            new_value = value
-        setattr(namespace, key, new_value)
-    return namespace
-
+    config = dict2namespace(config)
+    return args, config
 
 def main():
     args, config = parse_args_and_config()
 
-    # setup device
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    print("Using device: {}".format(device))
+    # device & seed
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     config.device = device
+    torch.manual_seed(args.seed); np.random.seed(args.seed)
+    if torch.cuda.is_available(): torch.cuda.manual_seed_all(args.seed)
+    cudnn.benchmark = False
 
-    if torch.cuda.is_available():
-        print('Note: Currently supports evaluations (restoration) when run only on a single GPU!')
+    # Colab 안전: 로더 만들기 전에 num_workers=0
+    if hasattr(config, "data"):
+        config.data.num_workers = 0
 
-    # seed 고정
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.benchmark = False  # Colab에서 메모리 스파이크 방지
-
-    # data loading
-    print("=> using dataset '{}'".format(config.data.dataset))
+    # data loading — 우리 로더는 train/val 고정
+    print(f"=> using dataset '{config.data.dataset}'")
     DATASET = datasets.__dict__[config.data.dataset](config)
-    _, val_loader = DATASET.get_loaders(parse_patches=False, validation=args.test_set)
+    _, val_loader = DATASET.get_loaders(parse_patches=False)  # ← validation 인자 제거
 
-    # worker 강제로 줄이기
-    val_loader.num_workers = 0 if hasattr(val_loader, "num_workers") else 0
-
-    # create model
+    # 모델 생성
     print("=> creating denoising-diffusion model with wrapper...")
     diffusion = DenoisingDiffusion(args, config)
     model = DiffusiveRestoration(diffusion, args, config)
 
-    # restore (no grad)
-    with torch.no_grad():
-        model.restore(val_loader, validation=args.test_set, r=args.grid_r)
+    os.makedirs(args.image_folder, exist_ok=True)
 
+    # 복원 실행
+    with torch.no_grad():
+        # 모델 시그니처가 아직 validation=str 를 요구하면 아래 줄을:
+        # model.restore(val_loader, validation="val", r=args.grid_r)
+        # 로 쓰고, 모델에서 validation 인자를 제거했으면 아래 줄을 쓰세요.
+        model.restore(val_loader, r=args.grid_r)
+
+    print(f"=> done. images saved to: {args.image_folder}")
 
 if __name__ == '__main__':
     main()

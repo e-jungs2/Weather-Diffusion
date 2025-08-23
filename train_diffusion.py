@@ -1,75 +1,58 @@
-import argparse
-import os
-import random
-import socket
-import yaml
-import torch
+# train_diffusion.py  (교체본)
+import argparse, os, yaml, torch, numpy as np
 import torch.backends.cudnn as cudnn
-import torch.utils.data
-import numpy as np
-import torchvision
-import models
 import datasets
-import utils
-from models import DenoisingDiffusion
+import models_finetune as models
+from models_finetune import DenoisingDiffusion, DiffusiveRestoration
 
+def dict2namespace(d):
+    ns = argparse.Namespace()
+    for k, v in d.items():
+        setattr(ns, k, dict2namespace(v) if isinstance(v, dict) else v)
+    return ns
 
 def parse_args_and_config():
-    parser = argparse.ArgumentParser(description='Training Patch-Based Denoising Diffusion Models')
-    parser.add_argument("--config", type=str, required=True,
-                        help="Path to the config file")
-    parser.add_argument('--resume', default='', type=str,
-                        help='Path for checkpoint to load and resume')
-    parser.add_argument("--sampling_timesteps", type=int, default=25,
-                        help="Number of implicit sampling steps for validation image patches")
-    parser.add_argument("--image_folder", default='results/images/', type=str,
-                        help="Location to save restored validation image patches")
-    parser.add_argument('--seed', default=61, type=int, metavar='N',
-                        help='Seed for initializing training (default: 61)')
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(description="Training Patch-Based Denoising Diffusion Models")
+    p.add_argument("--config", type=str, required=True, help="Config path or name under ./configs")
+    p.add_argument("--resume", type=str, default="", help="Checkpoint to load (pretrained) and resume from")
+    p.add_argument("--sampling_timesteps", type=int, default=25,
+                   help="(optional) #steps for validation sampling inside training")
+    p.add_argument("--image_folder", type=str, default="results/images/",
+                   help="Where to save validation samples")
+    p.add_argument("--seed", type=int, default=61)
+    args = p.parse_args()
 
-    with open(os.path.join("configs", args.config), "r") as f:
-        config = yaml.safe_load(f)
-    new_config = dict2namespace(config)
-
-    return args, new_config
-
-
-def dict2namespace(config):
-    namespace = argparse.Namespace()
-    for key, value in config.items():
-        if isinstance(value, dict):
-            new_value = dict2namespace(value)
-        else:
-            new_value = value
-        setattr(namespace, key, new_value)
-    return namespace
-
+    cfg_path = args.config if os.path.isfile(args.config) else os.path.join("configs", args.config)
+    with open(cfg_path, "r") as f:
+        cfg = yaml.safe_load(f)
+    cfg = dict2namespace(cfg)
+    return args, cfg
 
 def main():
     args, config = parse_args_and_config()
 
-    # setup device to run
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    print("Using device: {}".format(device))
+    # device & seed
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"=> Using device: {device}")
     config.device = device
+    torch.manual_seed(args.seed); np.random.seed(args.seed)
+    if torch.cuda.is_available(): torch.cuda.manual_seed_all(args.seed)
+    cudnn.benchmark = True
 
-    # set random seed
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.benchmark = True
+    # Colab/로더 안전값 (로더 만들기 전에)
+    if hasattr(config, "data"):
+        config.data.num_workers = 0
 
-    # data loading
-    print("=> using dataset '{}'".format(config.data.dataset))
-    DATASET = datasets.__dict__[config.data.dataset](config)
+    # dataset 인스턴스 (로더 생성은 models 쪽에서 get_loaders() 호출)
+    print(f"=> using dataset '{config.data.dataset}'")
+    DATASET = datasets.__dict__[config.data.dataset](config)  # 우리 finetune AllWeather로 매핑되어야 함
 
-    # create model
+    # diffusion 모델 (finetune 버전이 __init__에서 로드/EMA/검증까지 처리)
     print("=> creating denoising-diffusion model...")
     diffusion = DenoisingDiffusion(args, config)
-    diffusion.train(DATASET)
 
+    # 학습 시작
+    diffusion.train(DATASET)
 
 if __name__ == "__main__":
     main()
