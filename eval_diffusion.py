@@ -52,7 +52,7 @@ def dict2namespace(config):
 def main():
     args, config = parse_args_and_config()
 
-    # setup device to run
+    # setup device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print("Using device: {}".format(device))
     config.device = device
@@ -60,23 +60,29 @@ def main():
     if torch.cuda.is_available():
         print('Note: Currently supports evaluations (restoration) when run only on a single GPU!')
 
-    # set random seed
+    # seed 고정
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False  # Colab에서 메모리 스파이크 방지
 
     # data loading
     print("=> using dataset '{}'".format(config.data.dataset))
     DATASET = datasets.__dict__[config.data.dataset](config)
     _, val_loader = DATASET.get_loaders(parse_patches=False, validation=args.test_set)
 
+    # worker 강제로 줄이기
+    val_loader.num_workers = 0 if hasattr(val_loader, "num_workers") else 0
+
     # create model
     print("=> creating denoising-diffusion model with wrapper...")
     diffusion = DenoisingDiffusion(args, config)
     model = DiffusiveRestoration(diffusion, args, config)
-    model.restore(val_loader, validation=args.test_set, r=args.grid_r)
+
+    # restore (no grad)
+    with torch.no_grad():
+        model.restore(val_loader, validation=args.test_set, r=args.grid_r)
 
 
 if __name__ == '__main__':
