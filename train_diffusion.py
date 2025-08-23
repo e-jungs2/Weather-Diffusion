@@ -4,6 +4,8 @@ import torch.backends.cudnn as cudnn
 import datasets
 import models_finetune as models
 from models_finetune import DenoisingDiffusion, DiffusiveRestoration
+import importlib, sys
+sys.modules['utils'] = importlib.import_module('utils_finetune')
 
 def dict2namespace(d):
     ns = argparse.Namespace()
