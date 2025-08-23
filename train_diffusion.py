@@ -13,20 +13,31 @@ def dict2namespace(d):
 
 def parse_args_and_config():
     p = argparse.ArgumentParser(description="Training Patch-Based Denoising Diffusion Models")
-    p.add_argument("--config", type=str, required=True, help="Config path or name under ./configs")
-    p.add_argument("--resume", type=str, default="", help="Checkpoint to load (pretrained) and resume from")
-    p.add_argument("--sampling_timesteps", type=int, default=25,
-                   help="(optional) #steps for validation sampling inside training")
-    p.add_argument("--image_folder", type=str, default="results/images/",
-                   help="Where to save validation samples")
+    p.add_argument("--config", type=str, required=True)
+    p.add_argument("--resume", type=str, default="")
+    p.add_argument("--sampling_timesteps", type=int, default=25)
+    p.add_argument("--image_folder", type=str, default="results/images/")
     p.add_argument("--seed", type=int, default=61)
     args = p.parse_args()
 
-    cfg_path = args.config if os.path.isfile(args.config) else os.path.join("configs", args.config)
+    # ✅ 파일이 그대로 주어지면 그 경로 사용, 아니면 후보 폴더에서 탐색
+    cand = args.config
+    search_roots = ["", "configs", "configs_finetune"]
+    if os.path.isabs(cand) or os.path.isfile(cand):
+        cfg_path = cand
+    else:
+        cfg_path = None
+        for root in search_roots:
+            path = os.path.join(root, cand) if root else cand
+            if os.path.isfile(path):
+                cfg_path = path
+                break
+    if cfg_path is None:
+        raise FileNotFoundError(f"Config not found: {args.config}")
+
     with open(cfg_path, "r") as f:
         cfg = yaml.safe_load(f)
-    cfg = dict2namespace(cfg)
-    return args, cfg
+    return args, dict2namespace(cfg)
 
 def main():
     args, config = parse_args_and_config()
